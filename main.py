@@ -141,6 +141,7 @@ def main():
         st.caption(' ')
         st.caption('사용하시는데 불편한 점이 있으면 아래 사용 가이드를 참고해보세요!')
         st.caption(' ')
+        st.markdown('**안녕! 이라고 인사해보세요 ✋✋**')
         st.page_link("pages/guide.py", label="사용 가이드 바로가기", help="사용 가이드로 이동합니다.", icon="▶")
 
     # 사이드바
