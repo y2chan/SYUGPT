@@ -96,7 +96,7 @@ URLs to various homepages must be spaced one space at the end.
                 - 3월, 9월
                     - 월요일 ~ 목요일 : am 9:00 ~ pm 8:00
                     - 금요일 : am 9:00 ~ pm 3:00
-                - 4월~8월, 10월~2월
+                - 4월 ~ 8월, 10월 ~ 2월
                     - 월요일 ~ 목요일 : am 8:30 ~ pm 7:00
                     - 금요일 : am 8:30 ~ pm 3:00
             - 방학중
