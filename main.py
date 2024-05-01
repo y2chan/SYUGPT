@@ -38,7 +38,7 @@ def generate_response(user_input):
             '장학금 data.txt': {'chunk_size': 4000, 'chunk_overlap': 100},
             '졸업 data.txt': {'chunk_size': 1200, 'chunk_overlap': 250},
             '증명서 data.txt': {'chunk_size': 2000, 'chunk_overlap': 250},
-            '학과 data.txt': {'chunk_size': 2000, 'chunk_overlap': 300},
+            '학과 data.txt': {'chunk_size': 7000, 'chunk_overlap': 500},
             '학사 일정 data.txt': {'chunk_size': 1500, 'chunk_overlap': 200},
             '후문 정보 data.txt': {'chunk_size': 2000, 'chunk_overlap': 300},
             '학교 건물 data.txt': {'chunk_size': 3000, 'chunk_overlap': 100},
