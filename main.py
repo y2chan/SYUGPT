@@ -8,6 +8,7 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableMap
 from langchain_google_genai import ChatGoogleGenerativeAI
+from functools import lru_cache
 
 # 환경 설정
 def setup_environment():
@@ -19,6 +20,7 @@ def setup_environment():
     os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
 
 # 문서 처리 준비
+@lru_cache(maxsize=100)  # 최대 100개의 유니크 요청을 캐시
 def generate_response(user_input):
     try:
 
