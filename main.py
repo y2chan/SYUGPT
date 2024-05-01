@@ -4,7 +4,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 import logging
 from langchain_community.document_loaders import DirectoryLoader
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableMap
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -19,12 +19,32 @@ def setup_environment():
     os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
     os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
 
-# 문서 처리 준비
-@lru_cache(maxsize=100)  # 최대 100개의 유니크 요청을 캐시
-def generate_response(user_input):
-    try:
 
-        # 파일별 설정
+# 전역 변수
+hf_embeddings = None
+docsearch = None
+
+def initialize_embeddings_and_docsearch():
+    global hf_embeddings, docsearch
+    model_name = "jhgan/ko-sbert-nli"
+    model_kwargs = {'device': 'cpu'}
+    encode_kwargs = {'normalize_embeddings': True}
+
+    # 임베딩 모델 로드
+    hf_embeddings = HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs=model_kwargs,
+        encode_kwargs=encode_kwargs
+    )
+
+    # 문서 로드 및 벡터 저장소 초기화
+    loader = DirectoryLoader(".", glob="data/SYU_GPT/*.txt", show_progress=True)
+    docs = loader.load()
+    all_splits = []
+
+    for doc in docs:
+        file_path = doc.metadata['source']
+        file_name = os.path.basename(file_path)
         config = {
             'introduce.txt': {'chunk_size': 1500, 'chunk_overlap': 300},
             '관련 링크 data.txt': {'chunk_size': 1500, 'chunk_overlap': 300},
@@ -45,45 +65,25 @@ def generate_response(user_input):
             '후문 정보 data.txt': {'chunk_size': 2000, 'chunk_overlap': 300},
             '학교 건물 data.txt': {'chunk_size': 3000, 'chunk_overlap': 100},
         }
+        chunk_size = config.get(file_name, {}).get('chunk_size', 1500)
+        chunk_overlap = config.get(file_name, {}).get('chunk_overlap', 300)
+        text_splitter = CharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        splits = text_splitter.split_documents([doc])
+        all_splits.extend(splits)
 
-        # DirectoryLoader로 모든 txt 파일 로드
-        loader = DirectoryLoader(".", glob="data/SYU_GPT/*.txt", show_progress=True)
-        docs = loader.load()
+    # 벡터 저장소 생성
+    if all_splits:
+        docsearch = FAISS.from_documents(all_splits, hf_embeddings)
 
-        all_splits = []
-        for doc in docs:
-            file_path = doc.metadata['source']
-            file_name = os.path.basename(file_path)
-
-            if file_name in config:
-                chunk_size = config[file_name]['chunk_size']
-                chunk_overlap = config[file_name]['chunk_overlap']
-            else:
-                chunk_size = 1500
-                chunk_overlap = 300
-
-            text_splitter = CharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap
-            )
-            splits = text_splitter.split_documents([doc])
-            all_splits.extend(splits)
-
-        # 모든 분할이 완료된 후에 한 번만 vectorstore를 생성
-        if all_splits:
-            model_name = "jhgan/ko-sbert-nli"
-            model_kwargs = {'device': 'cpu'}
-            encode_kwargs = {'normalize_embeddings': True}
-            hf = HuggingFaceEmbeddings(
-                model_name=model_name,
-                model_kwargs=model_kwargs,
-                encode_kwargs=encode_kwargs
-            )
-            docsearch = FAISS.from_documents(all_splits, hf)
+@lru_cache(maxsize=100)
+def generate_response(user_input):
+    global docsearch
+    try:
+        if docsearch:
+            # 검색 수행
             retriever = docsearch.as_retriever(
                 search_type="mmr",
                 search_kwargs={'k':3, 'fetch_k': 10})
-            retriever.get_relevant_documents("혁신성장 정책금융에 대해서 설명해줘")
             template = """당신의 이름은 SYU-GPT입니다. 삼육대학교에 대한 다양한 정보들을 제공하는 챗봇입니다.
                         All answers are based on the introduce.txt file.
                         Please introduce yourself when the questioner greets you.
@@ -97,14 +97,14 @@ def generate_response(user_input):
                         Don't make up anything that's not relevant to what you asked.
                         Please ensure the information provided is up to date and relevant to the user's query and files.
                         You always refers to factual statements that can be referenced.
-                        You says only facts related to 삼육대학교 and does not add information on its own.:
+                        You says only facts related to 삼육대학교 and does not add information on its own.
+                        삼육대학교 현재 16대 총장의 성함은 제해종 총장입니다.. 이전 15대 총장의 성함은 김일목 총장입니다.:
             {context}
             
             Question: {question}
             """
-
             prompt = ChatPromptTemplate.from_template(template)
-            llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature = 0, max_tokens=2048)
+            llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0, max_tokens=2048)
             chain = RunnableMap({
                 "context": lambda x: retriever.get_relevant_documents(x['question']),
                 "question": lambda x: x['question']
@@ -112,9 +112,9 @@ def generate_response(user_input):
             response = chain.invoke({'question': user_input}).content
             return response
         else:
-            print("No documents were split or processed.")
+            return "Docsearch is not initialized"
     except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
+        logging.error(f"An error occurred while generating response: {str(e)}")
         return f"오류가 발생했습니다: {str(e)}"
 
 def main():
@@ -130,6 +130,7 @@ def main():
         }
     )
 
+    # 애플리케이션 시작 시 한 번만 호출
     setup_environment()
 
     st.title('SYU-GPT', anchor=False)
@@ -169,6 +170,9 @@ def main():
     st.sidebar.page_link("https://www.syu.ac.kr/", label="Sahmyook University", help="삼육대학교 공식 사이트로 이동합니다")
     st.sidebar.page_link("https://chat.openai.com/", label="ChatGPT", help="Chat GPT 사이트로 이동합니다")
     st.sidebar.page_link("https://gabean.kr/", label="GaBean", help="개발자의 또 다른 웹 사이트로 이동합니다")
+
+    with st.spinner("데이터를 불러오는 중입니다..."):
+        initialize_embeddings_and_docsearch()
 
     if "chat_session" not in st.session_state:
         st.session_state.messages = []
