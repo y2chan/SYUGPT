@@ -76,6 +76,7 @@ def initialize_embeddings_and_docsearch():
         docsearch = FAISS.from_documents(all_splits, hf_embeddings)
 
 @lru_cache(maxsize=100)
+@st.cache_resource
 def generate_response(user_input):
     global docsearch
     try:
