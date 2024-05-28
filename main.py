@@ -8,6 +8,9 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableMap
 from langchain_google_genai import ChatGoogleGenerativeAI
+
+VECTOR_STORE_PATH = "data/vector_store.faiss"
+
 # 환경 설정
 def setup_environment():
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
@@ -37,77 +40,88 @@ def generate_response(user_input):
             '장학금 data.txt': {'chunk_size': 4000, 'chunk_overlap': 100},
             '졸업 data.txt': {'chunk_size': 1200, 'chunk_overlap': 250},
             '증명서 data.txt': {'chunk_size': 2000, 'chunk_overlap': 250},
-            '학과 data.txt': {'chunk_size': 2000, 'chunk_overlap': 300},
             '학과 data.txt': {'chunk_size': 7000, 'chunk_overlap': 500},
             '학사 일정 data.txt': {'chunk_size': 1500, 'chunk_overlap': 200},
             '후문 정보 data.txt': {'chunk_size': 2000, 'chunk_overlap': 300},
             '학교 건물 data.txt': {'chunk_size': 3000, 'chunk_overlap': 100},
         }
-        # DirectoryLoader로 모든 txt 파일 로드
-        loader = DirectoryLoader(".", glob="data/SYU_GPT/*.txt", show_progress=True)
-        docs = loader.load()
-        all_splits = []
-        for doc in docs:
-            file_path = doc.metadata['source']
-            file_name = os.path.basename(file_path)
-            if file_name in config:
-                chunk_size = config[file_name]['chunk_size']
-                chunk_overlap = config[file_name]['chunk_overlap']
-            else:
-                chunk_size = 1500
-                chunk_overlap = 300
-            text_splitter = CharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap
-            )
-            splits = text_splitter.split_documents([doc])
-            all_splits.extend(splits)
-        # 모든 분할이 완료된 후에 한 번만 vectorstore를 생성
-        if all_splits:
-            model_name = "jhgan/ko-sbert-nli"
-            model_kwargs = {'device': 'cpu'}
-            encode_kwargs = {'normalize_embeddings': True}
-            hf = HuggingFaceEmbeddings(
-                model_name=model_name,
-                model_kwargs=model_kwargs,
-                encode_kwargs=encode_kwargs
-            )
-            docsearch = FAISS.from_documents(all_splits, hf)
-            retriever = docsearch.as_retriever(
-                search_type="mmr",
-                search_kwargs={'k':3, 'fetch_k': 10})
-            retriever.get_relevant_documents("혁신성장 정책금융에 대해서 설명해줘")
-            template = """당신의 이름은 SYU-GPT입니다. 삼육대학교에 대한 다양한 정보들을 제공하는 챗봇입니다.
-                        All answers are based on the introduce.txt file.
-                        Please introduce yourself when the questioner greets you.
-                        Please introduce yourself when the questioner says "Hi", "Hello", "안녕".
-                        너는 학과, 장학금, 등록, 성적, 졸업, 수강신청, 셔틀버스, 교통, 시설정보, 학사일정, 도서관, 학교 건물, 증명서, 후문 정보, 동아리 등 다양한 주제의 정보를 제공합니다.
-                        The database consists of detailed information in each category's txt file.
-                        Your answers should be delivered in an accurate, informative, and friendly dialogue style.
-                        They should also be written in bullet style format.
-                        URLs to various homepages must be spaced one space at the end.
-                        When you tell me the URL, don't skip it and tell me the whole thing.
-                        Don't make up anything that's not relevant to what you asked.
-                        Please ensure the information provided is up to date and relevant to the user's query and files.
-                        You always refers to factual statements that can be referenced.
-                        You says only facts related to 삼육대학교 and does not add information on its own.:
-            {context}
-            
-            Question: {question}
-            """
-            prompt = ChatPromptTemplate.from_template(template)
-            llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature = 0, max_tokens=2048)
-            chain = RunnableMap({
-                "context": lambda x: retriever.get_relevant_documents(x['question']),
-                "question": lambda x: x['question']
-            }) | prompt | llm
-            response = chain.invoke({'question': user_input}).content
-            return response
+
+        # HuggingFaceEmbeddings 객체 생성
+        model_name = "jhgan/ko-sbert-nli"
+        model_kwargs = {'device': 'cpu'}
+        encode_kwargs = {'normalize_embeddings': True}
+        hf = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
+        )
+
+        if os.path.exists(VECTOR_STORE_PATH):
+            # 저장된 vector store가 있으면 이를 불러옵니다.
+            docsearch = FAISS.load_local(VECTOR_STORE_PATH, hf, allow_dangerous_deserialization=True)
         else:
-            print("No documents were split or processed.")
+            # DirectoryLoader로 모든 txt 파일 로드
+            loader = DirectoryLoader(".", glob="data/SYU_GPT/*.txt", show_progress=True)
+            docs = loader.load()
+            all_splits = []
+            for doc in docs:
+                file_path = doc.metadata['source']
+                file_name = os.path.basename(file_path)
+                if file_name in config:
+                    chunk_size = config[file_name]['chunk_size']
+                    chunk_overlap = config[file_name]['chunk_overlap']
+                else:
+                    chunk_size = 1500
+                    chunk_overlap = 300
+                text_splitter = CharacterTextSplitter(
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap
+                )
+                splits = text_splitter.split_documents([doc])
+                all_splits.extend(splits)
+            # 모든 분할이 완료된 후에 한 번만 vectorstore를 생성
+            if all_splits:
+                docsearch = FAISS.from_documents(all_splits, hf)
+                # 생성된 vector store를 로컬에 저장합니다.
+                docsearch.save_local(VECTOR_STORE_PATH)
+            else:
+                print("No documents were split or processed.")
+                return "문서 처리가 완료되지 않았습니다."
+
+        retriever = docsearch.as_retriever(
+            search_type="mmr",
+            search_kwargs={'k': 3, 'fetch_k': 10})
+        retriever.get_relevant_documents("혁신성장 정책금융에 대해서 설명해줘")
+        template = """당신의 이름은 SYU-GPT입니다. 삼육대학교에 대한 다양한 정보들을 제공하는 챗봇입니다.
+                    All answers are based on the introduce.txt file.
+                    Please introduce yourself when the questioner greets you.
+                    Please introduce yourself when the questioner says "Hi", "Hello", "안녕".
+                    너는 학과, 장학금, 등록, 성적, 졸업, 수강신청, 셔틀버스, 교통, 시설정보, 학사일정, 도서관, 학교 건물, 증명서, 후문 정보, 동아리 등 다양한 주제의 정보를 제공합니다.
+                    The database consists of detailed information in each category's txt file.
+                    Your answers should be delivered in an accurate, informative, and friendly dialogue style.
+                    They should also be written in bullet style format.
+                    URLs to various homepages must be spaced one space at the end.
+                    When you tell me the URL, don't skip it and tell me the whole thing.
+                    Don't make up anything that's not relevant to what you asked.
+                    Please ensure the information provided is up to date and relevant to the user's query and files.
+                    You always refers to factual statements that can be referenced.
+                    You says only facts related to 삼육대학교 and does not add information on its own.:
+        {context}
+        
+        Question: {question}
+        """
+        prompt = ChatPromptTemplate.from_template(template)
+        llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0, max_tokens=2048)
+        chain = RunnableMap({
+            "context": lambda x: retriever.get_relevant_documents(x['question']),
+            "question": lambda x: x['question']
+        }) | prompt | llm
+        response = chain.invoke({'question': user_input}).content
+        return response
     except Exception as e:
         logging.error(f"An error occurred: {str(e)}")
         return f"오류가 발생했습니다: {str(e)}"
+
 def main():
     st.set_page_config(
         page_title="SYU-GPT",
