@@ -1,4 +1,5 @@
 import os
+import time
 import streamlit as st
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -91,7 +92,6 @@ def generate_response(user_input):
         retriever = docsearch.as_retriever(
             search_type="mmr",
             search_kwargs={'k': 3, 'fetch_k': 10})
-        retriever.get_relevant_documents("혁신성장 정책금융에 대해서 설명해줘")
         template = """당신의 이름은 SYU-GPT입니다. 삼육대학교에 대한 다양한 정보들을 제공하는 챗봇입니다.
                     All answers are based on the introduce.txt file.
                     Please introduce yourself when the questioner greets you.
@@ -173,8 +173,7 @@ def main():
     if user_input := st.chat_input("질문을 입력하세요."):
         info_placeholder.empty()
         try:
-            with st.spinner("답변을 생성하는 중입니다..."):
-                response = generate_response(user_input)
+            response = generate_response(user_input)
             if response.startswith("오류가 발생했습니다:"):
                 st.error(response)
             else:
